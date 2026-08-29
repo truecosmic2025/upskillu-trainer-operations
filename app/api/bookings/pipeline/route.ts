@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, ensureBookingTables } from "../../../../lib/db";
-import { getBooking, requireFeature } from "../_lib";
+import { bookingDateKey, getBooking, requireFeature } from "../_lib";
 
 const flagFields = ["names_checked", "shared_with_client", "evaluation_sent", "certificates_issued"] as const;
 type FlagField = (typeof flagFields)[number];
@@ -43,7 +43,7 @@ export async function PATCH(request: NextRequest) {
     // Flag as late when the sheet arrives more than 24h after the session end.
     let late = false;
     if (booking.confirmed_date && booking.finish_time) {
-      const sessionEnd = new Date(`${booking.confirmed_date}T${booking.finish_time}:00`);
+      const sessionEnd = new Date(`${bookingDateKey(booking.confirmed_date)}T${booking.finish_time}:00`);
       if (!Number.isNaN(sessionEnd.getTime())) late = Date.now() - sessionEnd.getTime() > 24 * 60 * 60 * 1000;
     }
     await db().query(

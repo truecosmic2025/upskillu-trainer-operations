@@ -1,100 +1,84 @@
-# vinext-starter
+# UpskillU Trainer Operations
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+A **Next.js 16 + PostgreSQL** operations portal for training administrators. It retains the original single-tenant trainer-onboarding tracker, Google OAuth integration for Gmail and Calendar, and administrator session login. It now also manages multiple client accounts, booking delivery, people allocation, operational evidence, and human-reviewed weekly communications.
 
-## Prerequisites
+> **Safety principle:** The portal can read connected services and prepare internal drafts, but it never sends external messages or forwards client invites automatically. Staff review and explicitly approve external-facing content or record manual forwarding.
 
-- Node.js `>=22.13.0`
+## Core workflows
 
-## Quick Start
+| Area | What the portal records | Operational control |
+|---|---|---|
+| **Clients** | Client organisation, primary contact, and contact email | Every booking is tied to a real client record; no client is hard-coded |
+| **Bookings** | Session type, 2–3 proposed dates, chosen date, venue, timings, delivery mode, and status | A booking becomes `confirmed` only after the client-chosen date, venue, start time, and finish time are recorded |
+| **TBC dates** | Candidate dates stored as JSON records with `tbc`, `chosen`, or `archived` state | Choosing a date explicitly archives the remaining candidate dates and returns/shows those dates rather than silently deleting them |
+| **Trainer allocation** | Current trainer directory, monthly potential availability, lead role, booking allocations | Lead trainers are visually listed first and allocations record whether an allocation was a lead pick |
+| **Guest speakers** | Speaker directory and per-booking pending/confirmed links | Adding a speaker to a booking creates a separate invite-tracking record; attaching an existing speaker does not duplicate their directory record |
+| **Delivery invites** | Manual forwarded/unforwarded state and timestamp per trainer or speaker | The system only records that a human forwarded an invite—no invitation is sent from the portal |
+| **Post-session pipeline** | Attendance receipt time, late flag, name checking, client sharing, evaluation forms, certificates | Attendance is marked late when received more than 24 hours after the recorded session end; open items surface in the dashboard Attention cards |
+| **Weekly communications** | WhatsApp-ready weekly delivery roundup and Friday trainer reminder | Generated as internal drafts, requiring explicit approval; approval does not send anything and staff copy approved text manually |
+| **Entitlements** | Per-account feature flags for bookings, clients, and guest speakers | Every relevant API route checks entitlement state; all flags default to `true` and there is no billing or Stripe integration |
+
+## Data tables
+
+`lib/db.ts` follows the existing `ensureXTables()` pattern and creates the following delivery-operations records when any module is used:
+
+- `clients` and `bookings`;
+- `trainers`, `trainer_availability`, and `booking_allocations`;
+- `speakers` and `booking_speakers`;
+- `delivery_invites`;
+- `post_session_pipeline`;
+- `digest_drafts`; and
+- `account_entitlements`.
+
+The first booking-related request also brings the existing `trainer_onboarding` roster into the new `trainers` table. It will not overwrite any lead-role selection made by an administrator.
+
+## API structure
+
+The project keeps the existing route convention under `app/api/`.
+
+| Route | Supported operations |
+|---|---|
+| `/api/clients` | List, create, and edit clients |
+| `/api/bookings` | List and create bookings; edit invite details; choose/archive held dates; cancel booking |
+| `/api/bookings/allocations` | List, allocate, and remove trainers |
+| `/api/bookings/invites` | Read and manually record invite-forwarding status |
+| `/api/bookings/pipeline` | Read and update post-session evidence fields |
+| `/api/trainers` | List/add trainers; record lead role and monthly potential availability |
+| `/api/speakers` | List/add speakers; attach an existing speaker to a booking; change confirmation status |
+| `/api/digest` | List, create, and approve internal weekly digest/reminder drafts |
+| `/api/operations/attention` | Dashboard action cards for overdue delivery records and unforwarded invites |
+| `/api/entitlements` | Return active feature flags |
+
+All routes remain protected by the project’s existing session proxy. New booking operations rely on the following existing environment variables:
+
+```bash
+DATABASE_URL=postgres://...
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=change-me
+SESSION_SECRET=long-random-value
+```
+
+The original Google integration additionally uses its existing Google OAuth and encryption settings when connected.
+
+## Local development
 
 ```bash
 npm install
 npm run dev
+```
+
+For a production compilation check:
+
+```bash
 npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+The project requires PostgreSQL for runtime data operations. Tables are provisioned automatically through the existing database helper when the corresponding endpoints are used.
 
-## Included Shape
+## Verification coverage
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+The repository includes `tests/booking-operations.test.mjs`, a contract test that verifies the required routes, table definitions, human-approval language, held-date archival support, and attendance-late implementation are included in the working tree. Run it with:
 
-## Workspace Auth Headers
-
-Signed-in visitors receive both `oai-authenticated-user-id` and `oai-authenticated-user-email`. Private Sites require every visitor to sign in; public Sites may also have anonymous visitors, for whom neither header is present.
-
-The user ID is stable for the same user on the same Site and different across Sites. Email and name are intended for display or contact purposes.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id");
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```bash
+node --test tests/booking-operations.test.mjs
 ```
-
-## Optional Dispatch-Owned ChatGPT Sign-In
-
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
-
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)

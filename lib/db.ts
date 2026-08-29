@@ -35,6 +35,8 @@ export async function ensureGoogleTables() {
 }
 
 export async function ensureBookingTables() {
+  // Preserve the original onboarding tracker as the source for the initial trainer roster.
+  await ensureOnboardingTables();
   await db().query(`
     CREATE TABLE IF NOT EXISTS clients (
       id TEXT PRIMARY KEY,
@@ -136,6 +138,13 @@ export async function ensureBookingTables() {
       approved_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+  `);
+  // A deployment starts with the current onboarding trainers already available for allocation.
+  // On conflict, do not overwrite an administrator's lead-role decision in the new table.
+  await db().query(`
+    INSERT INTO trainers (email, name, initials)
+    SELECT email, name, initials FROM trainer_onboarding
+    ON CONFLICT (email) DO NOTHING
   `);
 }
 

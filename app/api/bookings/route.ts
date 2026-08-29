@@ -60,6 +60,9 @@ export async function PATCH(request: NextRequest) {
     await db().query(`UPDATE bookings SET status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=$1`, [body.id]);
     return NextResponse.json({ booking: await getBooking(body.id) });
   }
+  if (booking.status === "cancelled") {
+    return NextResponse.json({ error: "Cancelled bookings cannot be updated" }, { status: 409 });
+  }
 
   if (body.action === "choose_date") {
     if (!body.chosenDate) return NextResponse.json({ error: "A chosen date is required" }, { status: 400 });
@@ -71,9 +74,13 @@ export async function PATCH(request: NextRequest) {
     const next: ProposedDate[] = proposed.map((p) =>
       p.date === body.chosenDate ? { ...p, status: "chosen" as const } : p.status === "tbc" ? { ...p, status: "archived" as const } : p,
     );
+    const selectedDate = body.chosenDate;
+    const nextStatus = confirmationReady({ confirmed_date: selectedDate, venue: booking.venue, start_time: booking.start_time, finish_time: booking.finish_time })
+      ? "confirmed"
+      : "to_be_confirmed";
     await db().query(
-      `UPDATE bookings SET proposed_dates=$2::jsonb, confirmed_date=$3, updated_at=CURRENT_TIMESTAMP WHERE id=$1`,
-      [body.id, JSON.stringify(next), body.chosenDate],
+      `UPDATE bookings SET proposed_dates=$2::jsonb, confirmed_date=$3, status=$4, updated_at=CURRENT_TIMESTAMP WHERE id=$1`,
+      [body.id, JSON.stringify(next), selectedDate, nextStatus],
     );
     return NextResponse.json({ booking: await getBooking(body.id), archivedDates: archived.map((p) => p.date) });
   }
@@ -95,10 +102,10 @@ export async function PATCH(request: NextRequest) {
   const sessionType = body.sessionType?.trim() || booking.session_type;
   const deliveryMode = body.deliveryMode ?? booking.delivery_mode;
   let status = booking.status;
-  if (status === "to_be_confirmed" && confirmationReady({ venue, start_time: startTime, finish_time: finishTime })) {
+  if (status === "to_be_confirmed" && confirmationReady({ confirmed_date: booking.confirmed_date, venue, start_time: startTime, finish_time: finishTime })) {
     status = "confirmed";
   }
-  if (status === "confirmed" && !confirmationReady({ venue, start_time: startTime, finish_time: finishTime })) {
+  if (status === "confirmed" && !confirmationReady({ confirmed_date: booking.confirmed_date, venue, start_time: startTime, finish_time: finishTime })) {
     status = "to_be_confirmed";
   }
   await db().query(

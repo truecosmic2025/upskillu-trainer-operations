@@ -19,7 +19,7 @@ export type BookingRow = {
   client_name?: string;
   session_type: string;
   proposed_dates: Array<{ date: string; status: "tbc" | "chosen" | "archived" }>;
-  confirmed_date: string | null;
+  confirmed_date: string | Date | null;
   status: "to_be_confirmed" | "confirmed" | "cancelled";
   venue: string;
   start_time: string;
@@ -46,6 +46,11 @@ export async function getBooking(id: string) {
   return (result.rows[0] as BookingRow | undefined) ?? null;
 }
 
-export function confirmationReady(booking: Pick<BookingRow, "venue" | "start_time" | "finish_time">) {
-  return Boolean(booking.venue.trim() && booking.start_time.trim() && booking.finish_time.trim());
+export function bookingDateKey(value: unknown) {
+  return value instanceof Date ? value.toISOString().slice(0, 10) : String(value ?? "").slice(0, 10);
+}
+
+export function confirmationReady(booking: Pick<BookingRow, "confirmed_date" | "venue" | "start_time" | "finish_time">) {
+  // An official booking exists only when a client-selected date and the complete invite details are on record.
+  return Boolean(booking.confirmed_date && booking.venue.trim() && booking.start_time.trim() && booking.finish_time.trim());
 }
