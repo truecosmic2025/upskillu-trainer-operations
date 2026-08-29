@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, ensureBookingTables, getEntitlements, type FeatureFlags } from "../../../lib/db";
+import { getAccountBilling } from "../../../lib/billing";
 
 export function newId(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
@@ -9,6 +10,18 @@ export async function requireFeature(flag: keyof FeatureFlags) {
   const features = await getEntitlements();
   if (!features[flag]) {
     return NextResponse.json({ error: "This feature is not enabled on the current plan" }, { status: 403 });
+  }
+  return null;
+}
+
+/** Read operations stay available during a lapse; only account mutations are paused. */
+export async function requireActiveAccount() {
+  const billing = await getAccountBilling();
+  if (billing.status === "past_due" || billing.status === "canceled") {
+    return NextResponse.json(
+      { error: "This account's subscription needs attention before changes can be made. Contact your administrator." },
+      { status: 403 },
+    );
   }
   return null;
 }

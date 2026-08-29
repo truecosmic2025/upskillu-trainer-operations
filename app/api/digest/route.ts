@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, ensureBookingTables } from "../../../lib/db";
-import { newId, requireFeature } from "../bookings/_lib";
+import { newId, requireActiveAccount, requireFeature } from "../bookings/_lib";
 
 function nextWeekRange() {
   const now = new Date();
@@ -26,6 +26,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const accountBlocked = await requireActiveAccount();
+  if (accountBlocked) return accountBlocked;
   const blocked = await requireFeature("bookings");
   if (blocked) return blocked;
   const body = (await request.json()) as { kind?: "weekly_digest" | "friday_reminder" };
@@ -88,6 +90,8 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const accountBlocked = await requireActiveAccount();
+  if (accountBlocked) return accountBlocked;
   const blocked = await requireFeature("bookings");
   if (blocked) return blocked;
   const body = (await request.json()) as { id?: string; approvedBy?: string };

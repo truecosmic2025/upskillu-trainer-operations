@@ -125,7 +125,7 @@ export async function ensureBookingTables() {
     );
     CREATE TABLE IF NOT EXISTS account_entitlements (
       account_id TEXT PRIMARY KEY,
-      features JSONB NOT NULL DEFAULT '{"bookings":true,"guestSpeakers":true,"clients":true,"operationsAgent":true}'::jsonb,
+      features JSONB NOT NULL DEFAULT '{"bookings":true,"guestSpeakers":true,"clients":true,"operationsAgent":false}'::jsonb,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS digest_drafts (
@@ -138,6 +138,19 @@ export async function ensureBookingTables() {
       approved_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS account_billing (
+      account_id TEXT PRIMARY KEY DEFAULT 'default',
+      stripe_customer_id TEXT,
+      stripe_subscription_id TEXT,
+      stripe_checkout_session_id TEXT,
+      status TEXT NOT NULL DEFAULT 'inactive' CHECK (status IN ('inactive','trialing','active','past_due','canceled','comped')),
+      ai_addon_active BOOLEAN NOT NULL DEFAULT FALSE,
+      trial_days INTEGER NOT NULL DEFAULT 0 CHECK (trial_days IN (0,14)),
+      current_period_end TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_account_billing_customer ON account_billing(stripe_customer_id);
+    CREATE INDEX IF NOT EXISTS idx_account_billing_subscription ON account_billing(stripe_subscription_id);
     CREATE TABLE IF NOT EXISTS agent_usage_log (
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL DEFAULT 'default',
@@ -158,16 +171,18 @@ export async function ensureBookingTables() {
     SELECT email, name, initials FROM trainer_onboarding
     ON CONFLICT (email) DO NOTHING
   `);
-  // Existing accounts inherit the Operations Agent during this scaffold phase.
+  // Existing accounts keep any already-provisioned Operations Agent access. New billing webhooks
+  // become the ongoing source of truth for this feature and new account defaults are disabled.
   await db().query(`
     UPDATE account_entitlements
     SET features = features || '{"operationsAgent":true}'::jsonb,
         updated_at = CURRENT_TIMESTAMP
     WHERE NOT (features ? 'operationsAgent')
+      AND EXISTS (SELECT 1 FROM account_billing b WHERE b.account_id=account_entitlements.account_id AND b.ai_addon_active=TRUE)
   `);
 }
 
-export const defaultFeatures = { bookings: true, guestSpeakers: true, clients: true, operationsAgent: true } as const;
+export const defaultFeatures = { bookings: true, guestSpeakers: true, clients: true, operationsAgent: false } as const;
 export type FeatureFlags = Record<keyof typeof defaultFeatures, boolean>;
 
 export async function getEntitlements(accountId = "default"): Promise<FeatureFlags> {

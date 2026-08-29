@@ -9,9 +9,10 @@
     "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",
-    "test": "npm run build && npm run test:booking-operations && npm run test:operations-agent",
+    "test": "npm run build && npm run test:booking-operations && npm run test:operations-agent && npm run test:billing",
     "test:booking-operations": "node --test tests/booking-operations.test.mjs",
     "test:operations-agent": "tsx --test tests/operations-agent.test.ts",
+    "test:billing": "tsx --test tests/billing.test.ts",
     "lint": "eslint . --ignore-pattern .next"
   },
   "dependencies": {
@@ -19,7 +20,8 @@
     "next": "^16.3.3",
     "pg": "^8.23.0",
     "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react-dom": "19.2.6",
+    "stripe": "^22.6.0"
   },
   "devDependencies": {
     "@eslint/js": "9.39.4",

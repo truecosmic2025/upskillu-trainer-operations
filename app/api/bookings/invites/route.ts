@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, ensureBookingTables } from "../../../../lib/db";
-import { getBooking, requireFeature } from "../_lib";
+import { getBooking, requireActiveAccount, requireFeature } from "../_lib";
 
 export async function GET(request: NextRequest) {
   const blocked = await requireFeature("bookings");
@@ -16,6 +16,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const accountBlocked = await requireActiveAccount();
+  if (accountBlocked) return accountBlocked;
   const blocked = await requireFeature("bookings");
   if (blocked) return blocked;
   const body = (await request.json()) as {

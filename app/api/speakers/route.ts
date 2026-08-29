@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, ensureBookingTables } from "../../../lib/db";
-import { getBooking, newId, requireFeature } from "../bookings/_lib";
+import { getBooking, newId, requireActiveAccount, requireFeature } from "../bookings/_lib";
 
 async function attachToBooking(bookingId: string, speakerId: string) {
   const speaker = await db().query<{ id: string; name: string; contact: string }>(
@@ -44,6 +44,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const accountBlocked = await requireActiveAccount();
+  if (accountBlocked) return accountBlocked;
   const blocked = await requireFeature("guestSpeakers");
   if (blocked) return blocked;
   const body = (await request.json()) as { name?: string; contact?: string; bookingId?: string; speakerId?: string };
@@ -71,6 +73,8 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const accountBlocked = await requireActiveAccount();
+  if (accountBlocked) return accountBlocked;
   const blocked = await requireFeature("guestSpeakers");
   if (blocked) return blocked;
   const body = (await request.json()) as { bookingId?: string; speakerId?: string; status?: "pending" | "confirmed" };
@@ -91,6 +95,8 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const accountBlocked = await requireActiveAccount();
+  if (accountBlocked) return accountBlocked;
   const blocked = await requireFeature("guestSpeakers");
   if (blocked) return blocked;
   const body = (await request.json()) as { bookingId?: string; speakerId?: string };

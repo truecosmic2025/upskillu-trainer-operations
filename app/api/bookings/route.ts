@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, ensureBookingTables } from "../../../lib/db";
-import { confirmationReady, getBooking, listBookings, newId, requireFeature } from "./_lib";
+import { confirmationReady, getBooking, listBookings, newId, requireActiveAccount, requireFeature } from "./_lib";
 
 type ProposedDate = { date: string; status: "tbc" | "chosen" | "archived" };
 
@@ -12,6 +12,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const accountBlocked = await requireActiveAccount();
+  if (accountBlocked) return accountBlocked;
   const blocked = await requireFeature("bookings");
   if (blocked) return blocked;
   const body = (await request.json()) as {
@@ -38,6 +40,8 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const accountBlocked = await requireActiveAccount();
+  if (accountBlocked) return accountBlocked;
   const blocked = await requireFeature("bookings");
   if (blocked) return blocked;
   const body = (await request.json()) as {

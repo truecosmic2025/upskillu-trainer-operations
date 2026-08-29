@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, ensureBookingTables } from "../../../../lib/db";
-import { getBooking, newId, requireFeature } from "../_lib";
+import { getBooking, newId, requireActiveAccount, requireFeature } from "../_lib";
 
 export async function GET(request: NextRequest) {
   const blocked = await requireFeature("bookings");
@@ -21,6 +21,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const accountBlocked = await requireActiveAccount();
+  if (accountBlocked) return accountBlocked;
   const blocked = await requireFeature("bookings");
   if (blocked) return blocked;
   const body = (await request.json()) as { bookingId?: string; trainerEmail?: string; allocatedBy?: string };
@@ -55,6 +57,8 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const accountBlocked = await requireActiveAccount();
+  if (accountBlocked) return accountBlocked;
   const blocked = await requireFeature("bookings");
   if (blocked) return blocked;
   const body = (await request.json()) as { bookingId?: string; trainerEmail?: string };

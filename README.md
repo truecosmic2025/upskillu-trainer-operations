@@ -82,6 +82,27 @@ ANTHROPIC_API_KEY=
 
 If this key is absent, the Operations Agent panel displays a clear setup error instead of crashing. Google OAuth remains required only when the agent needs Gmail, Calendar, or Gmail-draft access. A tool that creates a Gmail draft still requires a person to open, review, and send that draft outside the agent.
 
+## Stripe subscription billing
+
+The portal supports one Kromdigital Stripe customer and **one Stripe subscription per client account**. The base subscription provides the delivery-operations features for **$119.00/month**. The optional AI add-on is a second subscription item for **$39.00/month**, and it is the only normal billing path that enables the Operations Agent.
+
+Create the two recurring monthly Price objects directly in the Kromdigital Stripe Dashboard before enabling this integration. Their identifiers, Stripe secret key, and webhook signing secret must be supplied only through Railway service variables—never through source control:
+
+```bash
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+STRIPE_PRICE_BASE=       # Dashboard-created $119/month recurring Price ID
+STRIPE_PRICE_AI_ADDON=   # Dashboard-created $39/month recurring Price ID
+```
+
+The Checkout endpoint accepts `includeAiAddon` and the per-account `trialDays` choice (`0` or `14`). A 14-day trial is added only when requested; immediate billing omits the trial parameter. The endpoint records the Stripe Checkout session but leaves the billing state inactive until a verified webhook updates it.
+
+Register the deployed `https://<your-portal>/api/billing/webhook` URL in the Kromdigital Stripe Dashboard and subscribe it to `checkout.session.completed`, `customer.subscription.updated`, and `customer.subscription.deleted`. Stripe webhook verification uses the original request body, the `Stripe-Signature` header, and `STRIPE_WEBHOOK_SECRET`; payloads that fail verification are rejected without any database change.[3]
+
+> **One-subscription safeguard:** Stripe Checkout creates a new subscription. For an account with an existing base subscription, the AI add-on UI calls the same secure endpoint, which adds `STRIPE_PRICE_AI_ADDON` as an item on the existing subscription instead. This retains the requested one-subscription, two-item model. Stripe documents subscription items as the supported way to add an item without replacing existing items.[4]
+
+The billing state is available at `/api/billing/status`. Accounts in `past_due` or `canceled` status retain read access but all booking, client, trainer, speaker, allocation, invite, pipeline, and digest mutations receive a 403 response. Active, trialing, and internal-only `comped` accounts can write. The `comped` route requires the configured internal administrator and Stripe webhooks deliberately do not override that status. The customer portal route creates a short-lived Stripe-hosted management link for an authenticated customer.[5]
+
 ## Local development
 
 ```bash
@@ -115,3 +136,6 @@ DATABASE_URL=postgres://... npm run test:operations-agent
 
 [1]: https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview "Anthropic: Tool use with Claude"
 [2]: https://platform.claude.com/docs/en/models/overview "Anthropic: Models overview"
+[3]: https://docs.stripe.com/webhooks "Stripe: Receive Stripe events in your webhook endpoint"
+[4]: https://docs.stripe.com/api/subscription_items/create "Stripe: Create a subscription item"
+[5]: https://docs.stripe.com/customer-management/integrate-customer-portal "Stripe: Integrate the customer portal with the API"

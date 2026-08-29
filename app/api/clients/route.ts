@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, ensureBookingTables } from "../../../lib/db";
-import { newId, requireFeature } from "../bookings/_lib";
+import { newId, requireActiveAccount, requireFeature } from "../bookings/_lib";
 
 export async function GET() {
   const blocked = await requireFeature("clients");
@@ -11,6 +11,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const accountBlocked = await requireActiveAccount();
+  if (accountBlocked) return accountBlocked;
   const blocked = await requireFeature("clients");
   if (blocked) return blocked;
   const body = (await request.json()) as { name?: string; primaryContact?: string; contactEmail?: string };
@@ -26,6 +28,8 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const accountBlocked = await requireActiveAccount();
+  if (accountBlocked) return accountBlocked;
   const blocked = await requireFeature("clients");
   if (blocked) return blocked;
   const body = (await request.json()) as { id?: string; name?: string; primaryContact?: string; contactEmail?: string };

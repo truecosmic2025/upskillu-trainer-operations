@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, ensureBookingTables } from "../../../../lib/db";
-import { bookingDateKey, getBooking, requireFeature } from "../_lib";
+import { bookingDateKey, getBooking, requireActiveAccount, requireFeature } from "../_lib";
 
 const flagFields = ["names_checked", "shared_with_client", "evaluation_sent", "certificates_issued"] as const;
 type FlagField = (typeof flagFields)[number];
@@ -25,6 +25,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const accountBlocked = await requireActiveAccount();
+  if (accountBlocked) return accountBlocked;
   const blocked = await requireFeature("bookings");
   if (blocked) return blocked;
   const body = (await request.json()) as {
