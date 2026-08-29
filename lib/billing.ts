@@ -23,6 +23,11 @@ export type StripeSubscriptionLike = {
 };
 
 export type StripeClient = {
+  products: { create: (params: Record<string, unknown>) => Promise<{ id: string }> };
+  prices: {
+    list: (params: Record<string, unknown>) => Promise<{ data: Array<{ id: string; lookup_key?: string | null }> }>;
+    create: (params: Record<string, unknown>) => Promise<{ id: string; lookup_key?: string | null }>;
+  };
   customers: { create: (params: Record<string, unknown>) => Promise<{ id: string }> };
   checkout: { sessions: { create: (params: Record<string, unknown>) => Promise<{ id: string; url: string | null }> } };
   subscriptions: { retrieve: (id: string) => Promise<StripeSubscriptionLike> };
@@ -31,21 +36,12 @@ export type StripeClient = {
   webhooks: { constructEvent: (payload: string | Buffer, signature: string, secret: string) => Stripe.Event };
 };
 
-export const BASE_PRICE_USD_CENTS = 11_900;
-export const AI_ADDON_USD_CENTS = 3_900;
 const ALLOWED_BILLING_STATUSES = new Set<BillingStatus>(["inactive", "trialing", "active", "past_due", "canceled", "comped"]);
 
 export function configuredStripe(): StripeClient {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error("Billing is not configured. Add STRIPE_SECRET_KEY to the Railway service variables.");
   return new Stripe(key) as unknown as StripeClient;
-}
-
-export function configuredPriceIds() {
-  const base = process.env.STRIPE_PRICE_BASE;
-  const aiAddon = process.env.STRIPE_PRICE_AI_ADDON;
-  if (!base || !aiAddon) throw new Error("Billing is not configured. Add STRIPE_PRICE_BASE and STRIPE_PRICE_AI_ADDON to the Railway service variables.");
-  return { base, aiAddon };
 }
 
 export async function getAccountBilling(accountId = "default"): Promise<BillingRecord> {
@@ -149,7 +145,7 @@ export async function createBillingCheckout(input: {
   trialDays: 0 | 14;
   origin: string;
   stripe: StripeClient;
-  priceIds: { base: string; aiAddon: string };
+  priceIds: { basePriceId: string; aiAddonPriceId: string };
 }) {
   const billing = await getAccountBilling(input.accountId);
   if (billing.stripe_subscription_id) {
@@ -158,7 +154,7 @@ export async function createBillingCheckout(input: {
     // two-item model, add the add-on to the existing subscription using Stripe's subscription-item API.
     await input.stripe.subscriptionItems.create({
       subscription: billing.stripe_subscription_id,
-      price: input.priceIds.aiAddon,
+      price: input.priceIds.aiAddonPriceId,
       quantity: 1,
       proration_behavior: "create_prorations",
     });
@@ -172,8 +168,8 @@ export async function createBillingCheckout(input: {
     client_reference_id: input.accountId,
     metadata: { accountId: input.accountId, includeAiAddon: String(input.includeAiAddon) },
     line_items: [
-      { price: input.priceIds.base, quantity: 1 },
-      ...(input.includeAiAddon ? [{ price: input.priceIds.aiAddon, quantity: 1 }] : []),
+      { price: input.priceIds.basePriceId, quantity: 1 },
+      ...(input.includeAiAddon ? [{ price: input.priceIds.aiAddonPriceId, quantity: 1 }] : []),
     ],
     ...(input.trialDays === 14 ? { subscription_data: { trial_period_days: 14, metadata: { accountId: input.accountId } } } : {}),
     success_url: `${input.origin}/?billing=success`,

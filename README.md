@@ -86,20 +86,20 @@ If this key is absent, the Operations Agent panel displays a clear setup error i
 
 The portal supports one Kromdigital Stripe customer and **one Stripe subscription per client account**. The base subscription provides the delivery-operations features for **$119.00/month**. The optional AI add-on is a second subscription item for **$39.00/month**, and it is the only normal billing path that enables the Operations Agent.
 
-Create the two recurring monthly Price objects directly in the Kromdigital Stripe Dashboard before enabling this integration. Their identifiers, Stripe secret key, and webhook signing secret must be supplied only through Railway service variables—never through source control:
+Only the Stripe secret key and webhook signing secret are required in Railway service variables. They are never stored in source control:
 
 ```bash
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
-STRIPE_PRICE_BASE=       # Dashboard-created $119/month recurring Price ID
-STRIPE_PRICE_AI_ADDON=   # Dashboard-created $39/month recurring Price ID
 ```
+
+On its first billing use, `ensureBillingPrices()` resolves two active recurring monthly Price objects by lookup key. If either is missing, it creates the Product and Price through the Kromdigital Stripe account, using `upskillu_base_monthly_119` at `11900` cents and `upskillu_ai_addon_monthly_39` at `3900` cents. The result is cached for the process lifetime. On a cold start or redeploy, the lookup keys make the same operation idempotent rather than creating duplicates.[6]
 
 The Checkout endpoint accepts `includeAiAddon` and the per-account `trialDays` choice (`0` or `14`). A 14-day trial is added only when requested; immediate billing omits the trial parameter. The endpoint records the Stripe Checkout session but leaves the billing state inactive until a verified webhook updates it.
 
 Register the deployed `https://<your-portal>/api/billing/webhook` URL in the Kromdigital Stripe Dashboard and subscribe it to `checkout.session.completed`, `customer.subscription.updated`, and `customer.subscription.deleted`. Stripe webhook verification uses the original request body, the `Stripe-Signature` header, and `STRIPE_WEBHOOK_SECRET`; payloads that fail verification are rejected without any database change.[3]
 
-> **One-subscription safeguard:** Stripe Checkout creates a new subscription. For an account with an existing base subscription, the AI add-on UI calls the same secure endpoint, which adds `STRIPE_PRICE_AI_ADDON` as an item on the existing subscription instead. This retains the requested one-subscription, two-item model. Stripe documents subscription items as the supported way to add an item without replacing existing items.[4]
+> **One-subscription safeguard:** Stripe Checkout creates a new subscription. For an account with an existing base subscription, the AI add-on UI calls the same secure endpoint, which adds the dynamically resolved AI add-on Price as an item on the existing subscription instead. This retains the requested one-subscription, two-item model. Stripe documents subscription items as the supported way to add an item without replacing existing items.[4]
 
 The billing state is available at `/api/billing/status`. Accounts in `past_due` or `canceled` status retain read access but all booking, client, trainer, speaker, allocation, invite, pipeline, and digest mutations receive a 403 response. Active, trialing, and internal-only `comped` accounts can write. The `comped` route requires the configured internal administrator and Stripe webhooks deliberately do not override that status. The customer portal route creates a short-lived Stripe-hosted management link for an authenticated customer.[5]
 
@@ -126,10 +126,10 @@ The repository includes `tests/booking-operations.test.mjs`, a contract test tha
 node --test tests/booking-operations.test.mjs
 ```
 
-The Operations Agent test suite includes a real PostgreSQL test for its predefined pipeline queries and usage logging, a mocked Claude tool-use round trip to final answer, a draft-only endpoint check, and a missing-key failure check. Provide a test database URL when running it:
+The Operations Agent test suite includes a real PostgreSQL test for its predefined pipeline queries and usage logging, a mocked Claude tool-use round trip to final answer, a draft-only endpoint check, and a missing-key failure check. The Stripe billing suite adds verified webhook, entitlement, lapse-gate, trial, comped-account, subscription lifecycle, and dynamic Price idempotency tests. Provide a test database URL when running the full suite:
 
 ```bash
-DATABASE_URL=postgres://... npm run test:operations-agent
+DATABASE_URL=postgres://... npm test
 ```
 
 ## References
@@ -139,3 +139,4 @@ DATABASE_URL=postgres://... npm run test:operations-agent
 [3]: https://docs.stripe.com/webhooks "Stripe: Receive Stripe events in your webhook endpoint"
 [4]: https://docs.stripe.com/api/subscription_items/create "Stripe: Create a subscription item"
 [5]: https://docs.stripe.com/customer-management/integrate-customer-portal "Stripe: Integrate the customer portal with the API"
+[6]: https://docs.stripe.com/api/prices/list "Stripe: List Prices by lookup key"

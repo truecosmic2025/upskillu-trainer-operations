@@ -3,7 +3,6 @@ import { currentStaffEmail } from "../app/api/integrations/google/_lib";
 import { publicOrigin } from "./public-url";
 import { getEntitlements } from "./db";
 import {
-  configuredPriceIds,
   configuredStripe,
   createBillingCheckout,
   createCustomerPortal,
@@ -12,6 +11,7 @@ import {
   setAccountComped,
   type StripeClient,
 } from "./billing";
+import { ensureBillingPrices } from "./billing-setup";
 
 type StaffGetter = () => Promise<string | null>;
 type StripeFactory = () => StripeClient;
@@ -31,16 +31,18 @@ async function requireStaff(getter: StaffGetter) {
   return email || null;
 }
 
-export function createBillingCheckoutHandler(dependencies: { currentStaff?: StaffGetter; stripeFactory?: StripeFactory; priceIds?: () => { base: string; aiAddon: string } } = {}) {
+export function createBillingCheckoutHandler(dependencies: { currentStaff?: StaffGetter; stripeFactory?: StripeFactory; priceResolver?: (stripe: StripeClient) => Promise<{ basePriceId: string; aiAddonPriceId: string }> } = {}) {
   return async function checkout(request: NextRequest) {
     if (!await requireStaff(dependencies.currentStaff ?? currentStaffEmail)) return NextResponse.json({ error: "Administrator sign-in required" }, { status: 401 });
     try {
       const input = checkoutInput(await request.json() as { includeAiAddon?: unknown; trialDays?: unknown; accountId?: unknown });
+      const stripe = (dependencies.stripeFactory ?? configuredStripe)();
+      const priceIds = await (dependencies.priceResolver ?? ensureBillingPrices)(stripe);
       const result = await createBillingCheckout({
         ...input,
         origin: publicOrigin(request),
-        stripe: (dependencies.stripeFactory ?? configuredStripe)(),
-        priceIds: (dependencies.priceIds ?? configuredPriceIds)(),
+        stripe,
+        priceIds,
       });
       return NextResponse.json(result, { status: result.action === "checkout_created" ? 201 : 200 });
     } catch (error) {
@@ -85,7 +87,7 @@ export function createBillingStatusHandler(dependencies: { currentStaff?: StaffG
   };
 }
 
-export function createStripeWebhookHandler(dependencies: { stripeFactory?: StripeFactory; webhookSecret?: string | undefined; aiPriceId?: string | undefined } = {}) {
+export function createStripeWebhookHandler(dependencies: { stripeFactory?: StripeFactory; webhookSecret?: string | undefined; priceResolver?: (stripe: StripeClient) => Promise<{ basePriceId: string; aiAddonPriceId: string }> } = {}) {
   return async function webhook(request: Request) {
     const signature = request.headers.get("stripe-signature");
     const secret = dependencies.webhookSecret ?? process.env.STRIPE_WEBHOOK_SECRET;
@@ -99,8 +101,8 @@ export function createStripeWebhookHandler(dependencies: { stripeFactory?: Strip
     }
     try {
       const stripe = (dependencies.stripeFactory ?? configuredStripe)();
-      const aiPriceId = dependencies.aiPriceId ?? configuredPriceIds().aiAddon;
-      const result = await processVerifiedStripeEvent(event, stripe, aiPriceId);
+      const priceIds = await (dependencies.priceResolver ?? ensureBillingPrices)(stripe);
+      const result = await processVerifiedStripeEvent(event, stripe, priceIds.aiAddonPriceId);
       return NextResponse.json({ received: true, result });
     } catch (error) {
       console.error("Verified Stripe webhook processing failed", error);

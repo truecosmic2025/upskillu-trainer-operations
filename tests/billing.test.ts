@@ -6,17 +6,23 @@ import { GET as bookingsGet, PATCH as bookingsPatch } from "../app/api/bookings/
 import { createBillingCheckoutHandler, createStripeWebhookHandler } from "../lib/billing-handlers";
 import { db, ensureBookingTables, getEntitlements } from "../lib/db";
 import type { StripeClient } from "../lib/billing";
+import { AI_ADDON_LOOKUP_KEY, BASE_LOOKUP_KEY, ensureBillingPrices, resetBillingPriceCacheForTests } from "../lib/billing-setup";
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 const dbTest = hasDatabase ? test : test.skip;
-const priceIds = { base: "price_base_119", aiAddon: "price_ai_39" };
+const priceIds = { basePriceId: "price_base_119", aiAddonPriceId: "price_ai_39" };
 
 function event(type: string, object: Record<string, unknown>) {
   return { id: `evt_${randomUUID()}`, type, data: { object } } as unknown as import("stripe").default.Event;
 }
 
-function mockStripe(input: { subscription?: Record<string, unknown>; event?: import("stripe").default.Event; capture?: Array<Record<string, unknown>> } = {}): StripeClient {
+function mockStripe(input: { subscription?: Record<string, unknown>; event?: import("stripe").default.Event; capture?: Array<Record<string, unknown>>; existingPrices?: Array<{id:string;lookup_key?:string|null}>; priceListCaptures?: Array<Record<string, unknown>>; productCaptures?: Array<Record<string, unknown>>; priceCaptures?: Array<Record<string, unknown>> } = {}): StripeClient {
   return {
+    products: { create: async (params) => { input.productCaptures?.push(params); return { id: `prod_${input.productCaptures?.length ?? 1}` }; } },
+    prices: {
+      list: async (params) => { input.priceListCaptures?.push(params); return { data: input.existingPrices ?? [] }; },
+      create: async (params) => { input.priceCaptures?.push(params); return { id: `price_created_${input.priceCaptures?.length ?? 1}`, lookup_key: typeof params.lookup_key === "string" ? params.lookup_key : null }; },
+    },
     customers: { create: async () => ({ id: "cus_checkout" }) },
     checkout: { sessions: { create: async (params) => { input.capture?.push(params); return { id: `cs_${input.capture?.length ?? 1}`, url: "https://checkout.stripe.test/session" }; } } },
     subscriptions: { retrieve: async () => input.subscription as never },
@@ -41,8 +47,8 @@ dbTest("signed checkout completion synchronizes billing and the Operations Agent
   const withoutAddon = `billing_base_${suffix}`;
   try {
     const scenarios = [
-      { accountId: withAddon, hasAddon: true, status: "trialing", prices: [priceIds.base, priceIds.aiAddon] },
-      { accountId: withoutAddon, hasAddon: false, status: "active", prices: [priceIds.base] },
+      { accountId: withAddon, hasAddon: true, status: "trialing", prices: [priceIds.basePriceId, priceIds.aiAddonPriceId] },
+      { accountId: withoutAddon, hasAddon: false, status: "active", prices: [priceIds.basePriceId] },
     ] as const;
     for (const scenario of scenarios) {
       const checkout = event("checkout.session.completed", {
@@ -62,7 +68,7 @@ dbTest("signed checkout completion synchronizes billing and the Operations Agent
           items: { data: scenario.prices.map((id) => ({ price: { id } })) },
         },
       });
-      const handler = createStripeWebhookHandler({ stripeFactory: () => stripe, webhookSecret: "whsec_test", aiPriceId: priceIds.aiAddon });
+      const handler = createStripeWebhookHandler({ stripeFactory: () => stripe, webhookSecret: "whsec_test", priceResolver: async () => priceIds });
       const response = await handler(new Request("http://localhost/api/billing/webhook", {
         method: "POST",
         headers: { "stripe-signature": "valid_signature" },
@@ -87,7 +93,7 @@ dbTest("an unsigned or invalid webhook is rejected without creating billing stat
   const accountId = `billing_invalid_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
   const checkout = event("checkout.session.completed", { id: "cs_invalid", client_reference_id: accountId, subscription: "sub_invalid" });
   const stripe = mockStripe({ event: checkout });
-  const handler = createStripeWebhookHandler({ stripeFactory: () => stripe, webhookSecret: "whsec_test", aiPriceId: priceIds.aiAddon });
+  const handler = createStripeWebhookHandler({ stripeFactory: () => stripe, webhookSecret: "whsec_test", priceResolver: async () => priceIds });
   const unsigned = await handler(new Request("http://localhost/api/billing/webhook", {
     method: "POST",
     body: JSON.stringify(checkout),
@@ -110,8 +116,8 @@ dbTest("a verified Stripe webhook never overrides an internal comped billing sta
     await db().query(`INSERT INTO account_billing (account_id, status, ai_addon_active) VALUES ($1,'comped',TRUE)`, [accountId]);
     await db().query(`INSERT INTO account_entitlements (account_id, features) VALUES ($1,'{"operationsAgent":true}'::jsonb)`, [accountId]);
     const checkout = event("checkout.session.completed", { id: "cs_comped", customer: "cus_comped", subscription: "sub_comped", client_reference_id: accountId, metadata: { accountId } });
-    const stripe = mockStripe({ event: checkout, subscription: { id: "sub_comped", customer: "cus_comped", status: "canceled", items: { data: [{ price: { id: priceIds.base } }] } } });
-    const handler = createStripeWebhookHandler({ stripeFactory: () => stripe, webhookSecret: "whsec_test", aiPriceId: priceIds.aiAddon });
+    const stripe = mockStripe({ event: checkout, subscription: { id: "sub_comped", customer: "cus_comped", status: "canceled", items: { data: [{ price: { id: priceIds.basePriceId } }] } } });
+    const handler = createStripeWebhookHandler({ stripeFactory: () => stripe, webhookSecret: "whsec_test", priceResolver: async () => priceIds });
     const response = await handler(new Request("http://localhost/api/billing/webhook", { method: "POST", headers: { "stripe-signature": "valid_signature" }, body: JSON.stringify(checkout) }));
     assert.equal(response.status, 200);
     const billing = await db().query(`SELECT status, ai_addon_active FROM account_billing WHERE account_id=$1`, [accountId]);
@@ -164,7 +170,7 @@ dbTest("Checkout creates a 14-day subscription trial only when requested and omi
     const handler = createBillingCheckoutHandler({
       currentStaff: async () => "admin@truecosmic.com",
       stripeFactory: () => stripe,
-      priceIds: () => priceIds,
+      priceResolver: async () => priceIds,
     });
     const delayed = await handler(new NextRequest("http://localhost/api/billing/checkout", {
       method: "POST",
@@ -200,10 +206,10 @@ dbTest("subscription update and deletion webhooks synchronize billing status and
       status: "past_due",
       current_period_end: 1_800_000_000,
       metadata: { accountId },
-      items: { data: [{ price: { id: priceIds.base } }] },
+      items: { data: [{ price: { id: priceIds.basePriceId } }] },
     });
     const stripe = mockStripe({ event: update });
-    const handler = createStripeWebhookHandler({ stripeFactory: () => stripe, webhookSecret: "whsec_test", aiPriceId: priceIds.aiAddon });
+    const handler = createStripeWebhookHandler({ stripeFactory: () => stripe, webhookSecret: "whsec_test", priceResolver: async () => priceIds });
     const updateResponse = await handler(new Request("http://localhost/api/billing/webhook", { method: "POST", headers: { "stripe-signature": "valid_signature" }, body: JSON.stringify(update) }));
     assert.equal(updateResponse.status, 200);
     let billing = await db().query(`SELECT status, ai_addon_active FROM account_billing WHERE account_id=$1`, [accountId]);
@@ -219,7 +225,7 @@ dbTest("subscription update and deletion webhooks synchronize billing status and
       items: { data: [] },
     });
     const deletionStripe = mockStripe({ event: deletion });
-    const deleteHandler = createStripeWebhookHandler({ stripeFactory: () => deletionStripe, webhookSecret: "whsec_test", aiPriceId: priceIds.aiAddon });
+    const deleteHandler = createStripeWebhookHandler({ stripeFactory: () => deletionStripe, webhookSecret: "whsec_test", priceResolver: async () => priceIds });
     const deleteResponse = await deleteHandler(new Request("http://localhost/api/billing/webhook", { method: "POST", headers: { "stripe-signature": "valid_signature" }, body: JSON.stringify(deletion) }));
     assert.equal(deleteResponse.status, 200);
     billing = await db().query(`SELECT status, ai_addon_active FROM account_billing WHERE account_id=$1`, [accountId]);
@@ -228,5 +234,50 @@ dbTest("subscription update and deletion webhooks synchronize billing status and
     assert.equal(entitlements.operationsAgent, false);
   } finally {
     await cleanAccount(accountId);
+  }
+});
+
+
+test("ensureBillingPrices reuses both active lookup-key Prices without creating products or Prices", async () => {
+  resetBillingPriceCacheForTests();
+  const productCaptures: Array<Record<string, unknown>> = [];
+  const priceCaptures: Array<Record<string, unknown>> = [];
+  const priceListCaptures: Array<Record<string, unknown>> = [];
+  const stripe = mockStripe({
+    existingPrices: [
+      { id: "price_existing_base", lookup_key: BASE_LOOKUP_KEY },
+      { id: "price_existing_ai", lookup_key: AI_ADDON_LOOKUP_KEY },
+    ],
+    productCaptures,
+    priceCaptures,
+    priceListCaptures,
+  });
+  try {
+    const prices = await ensureBillingPrices(stripe);
+    assert.deepEqual(prices, { basePriceId: "price_existing_base", aiAddonPriceId: "price_existing_ai" });
+    assert.equal(productCaptures.length, 0);
+    assert.equal(priceCaptures.length, 0);
+    assert.deepEqual(priceListCaptures[0], { lookup_keys: [BASE_LOOKUP_KEY, AI_ADDON_LOOKUP_KEY], active: true, expand: ["data.product"] });
+  } finally {
+    resetBillingPriceCacheForTests();
+  }
+});
+
+test("ensureBillingPrices creates exactly the two required monthly USD Prices when lookup keys are absent", async () => {
+  resetBillingPriceCacheForTests();
+  const productCaptures: Array<Record<string, unknown>> = [];
+  const priceCaptures: Array<Record<string, unknown>> = [];
+  const stripe = mockStripe({ existingPrices: [], productCaptures, priceCaptures });
+  try {
+    const prices = await ensureBillingPrices(stripe);
+    assert.deepEqual(prices, { basePriceId: "price_created_1", aiAddonPriceId: "price_created_2" });
+    assert.equal(productCaptures.length, 2);
+    assert.equal(priceCaptures.length, 2);
+    assert.deepEqual(priceCaptures.map(({ product, lookup_key, unit_amount, currency, recurring }) => ({ product, lookup_key, unit_amount, currency, recurring })), [
+      { product: "prod_1", lookup_key: BASE_LOOKUP_KEY, unit_amount: 11900, currency: "usd", recurring: { interval: "month" } },
+      { product: "prod_2", lookup_key: AI_ADDON_LOOKUP_KEY, unit_amount: 3900, currency: "usd", recurring: { interval: "month" } },
+    ]);
+  } finally {
+    resetBillingPriceCacheForTests();
   }
 });
