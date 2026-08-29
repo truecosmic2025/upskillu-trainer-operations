@@ -29,6 +29,21 @@ export async function GET(request: NextRequest) {
   if (blocked) return blocked;
   await ensureBookingTables();
   const bookingId = request.nextUrl.searchParams.get("bookingId");
+  const speakerId = request.nextUrl.searchParams.get("speakerId");
+  if (speakerId) {
+    const speaker = await db().query(`SELECT * FROM speakers WHERE id=$1`, [speakerId]);
+    if (!speaker.rows[0]) return NextResponse.json({ error: "Speaker not found" }, { status: 404 });
+    const bookings = await db().query(
+      `SELECT bs.status AS speaker_status, b.id AS booking_id, b.session_type, b.status AS booking_status, b.confirmed_date, b.venue, c.name AS client_name
+       FROM booking_speakers bs
+       JOIN bookings b ON b.id=bs.booking_id
+       JOIN clients c ON c.id=b.client_id
+       WHERE bs.speaker_id=$1
+       ORDER BY COALESCE(b.confirmed_date, b.created_at::date) DESC, b.created_at DESC`,
+      [speakerId],
+    );
+    return NextResponse.json({ speaker: speaker.rows[0], bookings: bookings.rows });
+  }
   const speakers = await db().query(`SELECT * FROM speakers ORDER BY name`);
   let bookingSpeakers: unknown[] = [];
   if (bookingId) {

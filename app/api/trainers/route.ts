@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
   if (accountBlocked) return accountBlocked;
   const blocked = await requireFeature("bookings");
   if (blocked) return blocked;
-  const body = (await request.json()) as { name?: string; email?: string; initials?: string; isLead?: boolean };
+  const body = (await request.json()) as { name?: string; email?: string; initials?: string; isLead?: boolean; deliveryMode?: string };
   if (!body.name?.trim() || !body.email?.trim()) {
     return NextResponse.json({ error: "Trainer name and email are required" }, { status: 400 });
   }
@@ -35,6 +35,12 @@ export async function POST(request: NextRequest) {
     `INSERT INTO trainers (email, name, initials, is_lead) VALUES ($1,$2,$3,$4)
      ON CONFLICT (email) DO UPDATE SET name=EXCLUDED.name, initials=EXCLUDED.initials, is_lead=EXCLUDED.is_lead`,
     [email, body.name.trim(), initials, Boolean(body.isLead)],
+  );
+  await db().query(
+    `INSERT INTO trainer_onboarding (email, name, initials, delivery_mode)
+     VALUES ($1,$2,$3,$4)
+     ON CONFLICT (email) DO UPDATE SET name=EXCLUDED.name, initials=EXCLUDED.initials, delivery_mode=EXCLUDED.delivery_mode`,
+    [email, body.name.trim(), initials, body.deliveryMode?.trim() || "Role to verify"],
   );
   const result = await db().query(`SELECT * FROM trainers WHERE email=$1`, [email]);
   return NextResponse.json({ trainer: result.rows[0] }, { status: 201 });

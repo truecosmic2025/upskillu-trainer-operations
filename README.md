@@ -140,3 +140,18 @@ DATABASE_URL=postgres://... npm test
 [4]: https://docs.stripe.com/api/subscription_items/create "Stripe: Create a subscription item"
 [5]: https://docs.stripe.com/customer-management/integrate-customer-portal "Stripe: Integrate the customer portal with the API"
 [6]: https://docs.stripe.com/api/prices/list "Stripe: List Prices by lookup key"
+
+
+## Client settings and connected workflows
+
+Signed-in administrators can now use the **Settings** area to set an organisation name, upload a PNG/JPEG/SVG logo (maximum 2MB), manage the Google Workspace connection, and change the deployment’s sole administrator email or password. Branding is stored in `account_settings`; when it has not been configured the application continues to use the **TrueCosmic** name and **TC** mark. The public logo endpoint returns only the stored image bytes and declared image content type.
+
+The first self-service credential change verifies the existing `ADMIN_PASSWORD` and replaces the environment-based login with a bcrypt-hashed `admin_credentials` record. Future sign-ins use that stored hash and the selected administrator email. Administrator settings remain available even when a billing subscription is past due or canceled, so the client can recover access without a billing-state deadlock.
+
+The Operations Agent now reports Google connection status and links to Settings for connect/reconnect actions. Client and guest-speaker cards open persisted profile details and booking history; trainer invitation creates a linked onboarding record; delivery-evidence rows can be uploaded, previewed, and downloaded; global search queries current clients, bookings, and trainers; and message draft checks record the actual five-item checklist state instead of always claiming success.
+
+Run the dedicated settings checks with:
+
+```bash
+DATABASE_URL=postgres://... npm run test:settings
+```

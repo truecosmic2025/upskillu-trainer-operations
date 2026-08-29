@@ -163,6 +163,33 @@ export async function ensureBookingTables() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_agent_usage_log_account_created ON agent_usage_log(account_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS account_settings (
+      account_id TEXT PRIMARY KEY DEFAULT 'default',
+      org_name TEXT,
+      logo_data BYTEA,
+      logo_mime TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS admin_credentials (
+      account_id TEXT PRIMARY KEY DEFAULT 'default',
+      email TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS delivery_documents (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      booking_reference TEXT NOT NULL,
+      trainer_name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'Awaiting upload',
+      file_name TEXT,
+      file_mime TEXT,
+      file_data BYTEA,
+      file_size INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    ALTER TABLE clients ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
   `);
   // A deployment starts with the current onboarding trainers already available for allocation.
   // On conflict, do not overwrite an administrator's lead-role decision in the new table.
@@ -170,6 +197,14 @@ export async function ensureBookingTables() {
     INSERT INTO trainers (email, name, initials)
     SELECT email, name, initials FROM trainer_onboarding
     ON CONFLICT (email) DO NOTHING
+  `);
+  await db().query(`
+    INSERT INTO delivery_documents (id, title, booking_reference, trainer_name, status)
+    VALUES
+      ('doc_register_tc_2408_01', 'Register', 'TC-2408-01', 'Max Auer', 'Awaiting upload'),
+      ('doc_debrief_tc_2408_01', 'Trainer debrief', 'TC-2408-01', 'Joelle Appiah', 'Needs review'),
+      ('doc_presentation_tc_0109_02', 'Presentation', 'TC-0109-02', 'Max Auer', 'Approved')
+    ON CONFLICT (id) DO NOTHING
   `);
   // Existing accounts keep any already-provisioned Operations Agent access. New billing webhooks
   // become the ongoing source of truth for this feature and new account defaults are disabled.
