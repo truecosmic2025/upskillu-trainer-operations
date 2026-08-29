@@ -60,6 +60,28 @@ SESSION_SECRET=long-random-value
 
 The original Google integration additionally uses its existing Google OAuth and encryption settings when connected.
 
+## Claude Operations Agent
+
+The **Operations Agent** uses the official Anthropic Messages API with the current Sonnet model alias, `claude-sonnet-5`. It runs a bounded tool-use loop with a maximum of six research rounds. The model can call only the application-defined tools below; it cannot run arbitrary SQL and it cannot send email or alter calendars.[1] [2]
+
+| Agent tool | Scope | Safety boundary |
+|---|---|---|
+| `query_pipeline` | Predefined, parameterized operational query shapes for bookings, clients, allocations, speakers, invites, and post-session records | The model selects a query shape, never writes SQL |
+| `search_gmail` | Trainer Operations-scoped Gmail metadata search | Read-only, capped at ten results; full bodies are not returned |
+| `get_gmail_message` | One Gmail thread already identified by the agent | Read-only metadata and snippets only |
+| `search_calendar` | Events inside a validated time range | Read-only; no event creation, editing, or deletion |
+| `draft_email` | Gmail **drafts** endpoint | Creates a draft only; there is no Gmail send endpoint anywhere in the agent implementation |
+
+Each executed tool call is stored in `agent_usage_log` with its account/conversation identifier, input, result, timestamp, and response-token usage for future cost reporting. The `operationsAgent` entitlement is enabled by default and is checked before the API route runs.
+
+Configure the Railway deployment with the following new service variable. Leave the value out of source control and provide it in Railway's environment-variable settings:
+
+```bash
+ANTHROPIC_API_KEY=
+```
+
+If this key is absent, the Operations Agent panel displays a clear setup error instead of crashing. Google OAuth remains required only when the agent needs Gmail, Calendar, or Gmail-draft access. A tool that creates a Gmail draft still requires a person to open, review, and send that draft outside the agent.
+
 ## Local development
 
 ```bash
@@ -82,3 +104,14 @@ The repository includes `tests/booking-operations.test.mjs`, a contract test tha
 ```bash
 node --test tests/booking-operations.test.mjs
 ```
+
+The Operations Agent test suite includes a real PostgreSQL test for its predefined pipeline queries and usage logging, a mocked Claude tool-use round trip to final answer, a draft-only endpoint check, and a missing-key failure check. Provide a test database URL when running it:
+
+```bash
+DATABASE_URL=postgres://... npm run test:operations-agent
+```
+
+## References
+
+[1]: https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview "Anthropic: Tool use with Claude"
+[2]: https://platform.claude.com/docs/en/models/overview "Anthropic: Models overview"

@@ -39,7 +39,7 @@ test("defines the complete PostgreSQL delivery-operations data model", async () 
   }
   assert.match(db, /'to_be_confirmed','confirmed','cancelled'/);
   assert.match(db, /attendance_late BOOLEAN NOT NULL DEFAULT FALSE/);
-  assert.match(db, /features JSONB NOT NULL DEFAULT '\{"bookings":true,"guestSpeakers":true,"clients":true\}'::jsonb/);
+  assert.match(db, /features JSONB NOT NULL DEFAULT '\{"bookings":true,"guestSpeakers":true,"clients":true,"operationsAgent":true\}'::jsonb/);
 });
 
 test("enforces the booking confirmation, held-date, and safety rules", async () => {

@@ -9,10 +9,13 @@
     "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs",
+    "test": "npm run build && npm run test:booking-operations && npm run test:operations-agent",
+    "test:booking-operations": "node --test tests/booking-operations.test.mjs",
+    "test:operations-agent": "tsx --test tests/operations-agent.test.ts",
     "lint": "eslint . --ignore-pattern .next"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.122.0",
     "next": "^16.3.3",
     "pg": "^8.23.0",
     "react": "19.2.6",
@@ -33,6 +36,7 @@
     "globals": "16.4.0",
     "react-server-dom-webpack": "19.2.6",
     "tailwindcss": "4.2.1",
+    "tsx": "^4.23.12",
     "typescript": "5.9.3",
     "typescript-eslint": "8.59.3",
     "vite": "8.0.13"
