@@ -60,27 +60,43 @@ SESSION_SECRET=long-random-value
 
 The original Google integration additionally uses its existing Google OAuth and encryption settings when connected.
 
-## Claude Operations Agent
+## Trainer scheduling safeguards and Trainer Portal
 
-The **Operations Agent** uses the official Anthropic Messages API with the current Sonnet model alias, `claude-sonnet-5`. It runs a bounded tool-use loop with a maximum of six research rounds. The model can call only the application-defined tools below; it cannot run arbitrary SQL and it cannot send email or alter calendars.[1] [2]
+The Trainer Operations assistant is now backed by an authoritative PostgreSQL model instead of Gmail, Calendar, email history, or conversation context. The versioned `trainer-operations-v1.0.0` instruction is stored in `trainer_operation_settings` and is passed to every OpenAI request. The production default is `gpt-5-mini`; set `OPENAI_MODEL` to an approved alternative only after verifying its tool-calling support. Every model tool call is added to the append-only `audit_log` table.
 
-| Agent tool | Scope | Safety boundary |
-|---|---|---|
-| `query_pipeline` | Predefined, parameterized operational query shapes for bookings, clients, allocations, speakers, invites, and post-session records | The model selects a query shape, never writes SQL |
-| `search_gmail` | Trainer Operations-scoped Gmail metadata search | Read-only, capped at ten results; full bodies are not returned |
-| `get_gmail_message` | One Gmail thread already identified by the agent | Read-only metadata and snippets only |
-| `search_calendar` | Events inside a validated time range | Read-only; no event creation, editing, or deletion |
-| `draft_email` | Gmail **drafts** endpoint | Creates a draft only; there is no Gmail send endpoint anywhere in the agent implementation |
+| Typed assistant tool | Server-side control |
+|---|---|
+| `get_session`, `get_assignment`, `get_approved_materials`, `get_readiness` | Return only data joined to the immutable `session_id`, never inbox or calendar evidence. |
+| `create_confirmation_draft`, `submit_send_for_approval` | Create and queue a draft only after readiness is checked. |
+| `send_approved_message` | Requires a still-valid human approval, then re-checks the exact assignment, status and current link version before sending. |
+| `record_acknowledgement`, `record_access_outcome` | Store explicit replies and attendance/admission incidents against the exact assignment. |
 
-Each executed tool call is stored in `agent_usage_log` with its account/conversation identifier, input, result, timestamp, and response-token usage for future cost reporting. The `operationsAgent` entitlement is enabled by default and is checked before the API route runs.
+The additive migration at `migrations/20260909_trainer_operations_phase_1_2.sql` creates the Phase 1 `sessions`, `learner_assignments`, `materials`, and `audit_log` records along with the Phase 2 portal, evaluation, invoice, expense, and compliance tables. The established on-demand database provisioner runs the same definitions for existing Railway installations.
 
-Configure the Railway deployment with the following new service variable. Leave the value out of source control and provide it in Railway's environment-variable settings:
+`/trainer` is a separate trainer-facing portal: trainers can register with email/password or use Google sign-in, edit only their own contact/payment/photo fields, upload a PDF/DOCX evaluation, attach a receipted expense, and submit evaluation-gated invoices. Other trainers' rates, invoices, profiles, session fees, and margins are not returned by any trainer-facing route. Admin APIs under `/api/trainer-portal/admin/` manage rates, contract status, onboarding, compliance, sessions, approval queues, attention items, and the draft UpskillU invoice. Session fees and margins remain exclusively admin-side.
+
+Set the following secret Railway variables, rather than committing them:
 
 ```bash
-ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5-mini
+CRON_SECRET=long-random-value
 ```
 
-If this key is absent, the Operations Agent panel displays a clear setup error instead of crashing. Google OAuth remains required only when the agent needs Gmail, Calendar, or Gmail-draft access. A tool that creates a Gmail draft still requires a person to open, review, and send that draft outside the agent.
+The existing Google Workspace connection must be re-authorized after deployment because evaluation delivery, approval-gated learner messages, and invoice decisions use the Gmail send scope. Add `https://<your-domain>/api/trainer-portal/auth/google/callback` to the Google OAuth client's authorized redirect URIs for trainer Google sign-in.
+
+Evaluation reminders are implemented at `POST /api/trainer-portal/internal/evaluation-reminders` and require `Authorization: Bearer $CRON_SECRET`. The new reminder settings are **disabled by default**, preserving the paused legacy automatic-reminder state. An administrator must explicitly enable the new setting after verification. Two safe deployment options are available:
+
+| Approach | Tradeoffs | Cost | Setup complexity |
+|---|---|---:|---|
+| Railway scheduled service configured with `0 * * * *` | Uses the existing deployment platform; configure the schedule in Railway service settings and call the protected endpoint. | Included with the existing platform plan where supported. | Low |
+| External authenticated HTTP scheduler | Keeps scheduling independent of the application host; secure the `CRON_SECRET` in the scheduler. | Varies by chosen provider. | Low–moderate |
+
+Do not enable either reminder trigger until the migration is applied, Gmail is re-authorized, and the regression suite has passed. This does not re-enable the legacy reminder mechanism.
+
+Provider messages are stored as `provider_evidence` with an explicit `unverified` status. Only an authenticated administrator can promote a candidate provider link through the evidence-verification action; the AI never performs this promotion. The system redacts email addresses, joining links, URLs, message bodies, recipients, and binary files from audit payloads. The AI receives only narrowly scoped, task-necessary data for one immutable session and, where applicable, one learner assignment.
+
+The same protected scheduler endpoint also records the following **disabled-by-default** canonical-session checkpoints in `session_checkpoint_events`: a confirmation record, a business-hours 48–72-hour readiness check, a business-day-before acknowledgement check, the session-start host access-pathway check, and a post-session outcome check. Offsets and business hours live in the `session_checkpoints` administrator setting; they are derived from `starts_at` plus `display_timezone`, never from a hand-entered weekday or standalone date.
 
 ## Stripe subscription billing
 
