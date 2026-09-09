@@ -56,6 +56,16 @@ CREATE TABLE IF NOT EXISTS session_checkpoint_events (
   recorded_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (session_id, checkpoint, subject_reference)
 );
+-- Phase 2 profiles and assignments depend on the legacy trainer directory.
+-- Preserve an existing table unchanged; create the compatible minimal form only when absent.
+CREATE TABLE IF NOT EXISTS trainers (
+  email TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  initials TEXT NOT NULL DEFAULT '',
+  is_lead BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_trainers_email_unique ON trainers(email);
 CREATE TABLE IF NOT EXISTS learner_assignments (
   assignment_id TEXT PRIMARY KEY,
   learner_id TEXT NOT NULL REFERENCES learners(learner_id) ON DELETE RESTRICT,
